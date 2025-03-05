@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EV Battery Management Dashboard</title>
+    <script src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+</head>
+<body class="bg-gray-100">
+    <div x-data="vehicleManager()" class="container mx-auto px-4 py-8">
+        <!-- Header with Refresh Button -->
+        <header class="mb-8 flex justify-between items-center">
+            <div>
+                <h1 class="text-3xl font-bold text-gray-800">EV Battery Management Dashboard</h1>
+                <p class="text-gray-600 mt-2">Monitor and manage your electric vehicle fleet</p>
+            </div>
+            <button @click="fetchVehicles()" 
+                    class="bg-blue-500 text-white px-4 py-2 rounded-md hover:bg-blue-600 transition-colors flex items-center">
+                <i class="bi bi-arrow-clockwise mr-2"></i>
+                Refresh All
+            </button>
+        </header>
+
+        <!-- Loading State -->
+        <div x-show="loading" 
+             class="flex flex-col justify-center items-center h-64 bg-white rounded-lg shadow-md">
+            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+            <p class="mt-4 text-gray-600">Loading vehicle data...</p>
+        </div>
+
+        <!-- Error State -->
+        <div x-show="error" 
+             class="bg-red-100 border border-red-400 text-red-700 px-6 py-4 rounded-lg relative mb-4" 
+             role="alert">
+            <strong class="font-bold">Error!</strong>
+            <span x-text="error" class="block sm:inline ml-2"></span>
+            <button @click="retryFetch()" 
+                    class="mt-2 bg-red-500 text-white px-4 py-2 rounded-md hover:bg-red-600 transition-colors">
+                Retry
+            </button>
+        </div>
+
+        <!-- Vehicle List -->
+        <div x-show="!loading && !error" 
+             class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <template x-for="vehicle in vehicles" :key="vehicle.id">
+                <div class="bg-white rounded-lg shadow-md p-6 transition-all duration-300 hover:shadow-lg">
+                    <div class="flex justify-between items-start mb-4">
+                        <h2 class="text-xl font-semibold text-gray-800" x-text="vehicle.model"></h2>
+                        <span class="bg-blue-100 text-blue-800 text-xs font-medium px-2.5 py-0.5 rounded-full" 
+                              x-text="'ID: ' + vehicle.id"></span>
+                    </div>
+                    
+                    <!-- Battery Status Visualization -->
+                    <div class="relative pt-1">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-xs font-semibold inline-block text-gray-600">Battery Status</span>
+                            <span class="text-xs font-semibold inline-block text-gray-600" 
+                                  x-text="vehicle.battery_status + '%'"></span>
+                        </div>
+                        <div class="overflow-hidden h-4 mb-4 text-xs flex rounded-full bg-gray-200">
+                            <div :style="`width: ${vehicle.battery_status}%`"
+                                 :class="{
+                                    'bg-red-500': vehicle.battery_status < 20,
+                                    'bg-yellow-500': vehicle.battery_status >= 20 && vehicle.battery_status < 60,
+                                    'bg-green-500': vehicle.battery_status >= 60
+                                 }"
+                                 class="shadow-none flex flex-col text-center whitespace-nowrap text-white justify-center transition-all duration-500">
+                            </div>
+                        </div>
+                        <!-- Battery Health Indicator -->
+                        <div class="text-xs text-gray-500 flex items-center">
+                            <i class="bi bi-lightning-charge-fill mr-1" 
+                               :class="{
+                                   'text-red-500': vehicle.battery_status < 20,
+                                   'text-yellow-500': vehicle.battery_status >= 20 && vehicle.battery_status < 60,
+                                   'text-green-500': vehicle.battery_status >= 60
+                               }"></i>
+                            <span x-text="getBatteryHealthStatus(vehicle.battery_status)"></span>
+                        </div>
+                    </div>
+
+                    <!-- Vehicle Details -->
+                    <div class="mt-4 space-y-2">
+                        <p class="text-sm text-gray-600 flex items-center">
+                            <i class="bi bi-battery-charging text-gray-500 mr-2"></i>
+                            <span class="font-medium">Capacity:</span>
+                            <span class="ml-2" x-text="vehicle.battery_capacity + ' kWh'"></span>
+                        </p>
+                        <p class="text-sm text-gray-600 flex items-center">
+                            <i class="bi bi-lightning text-gray-500 mr-2"></i>
+                            <span class="font-medium">Range:</span>
+                            <span class="ml-2" x-text="calculateRange(vehicle) + ' km (est.)'"></span>
+                        </p>
+                    </div>
+
+                    <!-- Action Buttons -->
+                    <div class="mt-6 flex space-x-3">
+                        <button @click="refreshVehicleStatus(vehicle.id)" 
+                                :disabled="vehicle.updating"
+                                class="flex-1 flex items-center justify-center px-4 py-2 bg-blue-500 text-white rounded-md hover:bg-blue-600 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                            <i class="bi" :class="vehicle.updating ? 'bi-hourglass-split animate-spin' : 'bi-arrow-clockwise'"></i>
+                            <span class="ml-2" x-text="vehicle.updating ? 'Updating...' : 'Refresh'"></span>
+                        </button>
+                        <button @click="showVehicleDetails(vehicle)" 
+                                class="flex-1 flex items-center justify-center px-4 py-2 bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors">
+                            <i class="bi bi-info-circle"></i>
+                            <span class="ml-2">Details</span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Vehicle Details Modal -->
+        <div x-show="selectedVehicle" 
+             x-transition
+             class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50"
+             @click.self="selectedVehicle = null">
+            <div class="bg-white rounded-lg shadow-xl p-6 max-w-md w-full" @click.stop>
+                <div class="flex justify-between items-start mb-6">
+                    <h3 class="text-2xl font-bold text-gray-800" x-text="selectedVehicle?.model"></h3>
+                    <button @click="selectedVehicle = null" 
+                            class="text-gray-500 hover:text-gray-700 transition-colors">
+                        <i class="bi bi-x-lg"></i>
+                    </button>
+                </div>
+                <div class="space-y-6">
+                    <!-- Vehicle Info -->
+                    <div class="space-y-4">
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-medium">Vehicle ID:</span>
+                            <span class="text-gray-800" x-text="selectedVehicle?.id"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-medium">Battery Capacity:</span>
+                            <span class="text-gray-800" x-text="selectedVehicle?.battery_capacity + ' kWh'"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-medium">Current Charge:</span>
+                            <span class="text-gray-800" x-text="selectedVehicle?.battery_status + '%'"></span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-gray-600 font-medium">Estimated Range:</span>
+                            <span class="text-gray-800" x-text="calculateRange(selectedVehicle) + ' km'"></span>
+                        </div>
+                    </div>
+
+                    <!-- Battery Status Bar -->
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm font-medium text-gray-600">Battery Status</span>
+                            <span class="text-sm font-medium" 
+                                  x-text="getBatteryHealthStatus(selectedVehicle?.battery_status)"
+                                  :class="{
+                                      'text-red-500': selectedVehicle?.battery_status < 20,
+                                      'text-yellow-500': selectedVehicle?.battery_status >= 20 && selectedVehicle?.battery_status < 60,
+                                      'text-green-500': selectedVehicle?.battery_status >= 60
+                                  }"></span>
+                        </div>
+                        <div class="h-4 bg-gray-200 rounded-full overflow-hidden">
+                            <div :style="`width: ${selectedVehicle?.battery_status}%`"
+                                 :class="{
+                                     'bg-red-500': selectedVehicle?.battery_status < 20,
+                                     'bg-yellow-500': selectedVehicle?.battery_status >= 20 && selectedVehicle?.battery_status < 60,
+                                     'bg-green-500': selectedVehicle?.battery_status >= 60
+                                 }"
+                                 class="h-full transition-all duration-500"></div>
+                        </div>
+                    </div>
+
+                    <!-- Action Button -->
+                    <button @click="refreshVehicleStatus(selectedVehicle.id)" 
+                            class="w-full bg-blue-500 text-white py-2 rounded-md hover:bg-blue-600 transition-colors flex items-center justify-center">
+                        <i class="bi bi-arrow-clockwise mr-2"></i>
+                        Update Status
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function vehicleManager() {
+            return {
+                vehicles: [],
+                loading: true,
+                error: null,
+                selectedVehicle: null,
+
+                async init() {
+                    await this.fetchVehicles();
+                },
+
+                async fetchVehicles() {
+                    try {
+                        this.loading = true;
+                        this.error = null;
+                        const response = await fetch('http://localhost:5000/api/vehicles');
+                        
+                        if (!response.ok) {
+                            throw new Error('Failed to fetch vehicles');
+                        }
+
+                        const data = await response.json();
+                        if (data.success) {
+                            this.vehicles = data.data.map(vehicle => ({
+                                ...vehicle,
+                                updating: false
+                            }));
+                        } else {
+                            throw new Error(data.message || 'Failed to fetch vehicles');
+                        }
+                    } catch (err) {
+                        this.error = err.message;
+                        // Fallback data for demo
+                        this.vehicles = [
+                            {
+                                id: "1",
+                                model: "Tesla Model S",
+                                battery_capacity: 100,
+                                battery_status: 80,
+                                updating: false
+                            },
+                            {
+                                id: "2",
+                                model: "Nissan Leaf",
+                                battery_capacity: 40,
+                                battery_status: 50,
+                                updating: false
+                            }
+                        ];
+                    } finally {
+                        this.loading = false;
+                    }
+                },
+
+                async refreshVehicleStatus(vehicleId) {
+                    const vehicle = this.vehicles.find(v => v.id === vehicleId);
+                    if (!vehicle) return;
+
+                    try {
+                        vehicle.updating = true;
+                        // Simulate API call
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        vehicle.battery_status = Math.floor(Math.random() * 100);
+                        
+                        // Update selected vehicle if it's open in modal
+                        if (this.selectedVehicle?.id === vehicleId) {
+                            this.selectedVehicle = {...vehicle};
+                        }
+                    } catch (err) {
+                        console.error('Error refreshing vehicle status:', err);
+                    } finally {
+                        vehicle.updating = false;
+                    }
+                },
+
+                showVehicleDetails(vehicle) {
+                    this.selectedVehicle = {...vehicle};
+                },
+
+                getBatteryHealthStatus(status) {
+                    if (status >= 80) return 'Excellent';
+                    if (status >= 60) return 'Good';
+                    if (status >= 40) return 'Moderate';
+                    if (status >= 20) return 'Low';
+                    return 'Critical';
+                },
+
+                calculateRange(vehicle) {
+                    if (!vehicle) return 0;
+                    // Rough estimation: 1 kWh = 5km range
+                    const maxRange = vehicle.battery_capacity * 5;
+                    return Math.round((vehicle.battery_status / 100) * maxRange);
+                },
+
+                retryFetch() {
+                    this.fetchVehicles();
+                }
+            }
+        }
+    </script>
+<script>document.body.addEventListener('wheel', e => { if (!e.ctrlKey) return; e.preventDefault(); return }, { passive: false })</script>
+	</body>
+</html>
